@@ -19,7 +19,7 @@ func main() {
 	log.SetPrefix("wasm-run: ")
 	log.SetFlags(0)
 
-	ExportFunctionName := flag.String("func-name", "main", "calling function name")
+	wasmFuncName := flag.String("func-name", "main", "called function name")
 
 	flag.Parse()
 
@@ -28,39 +28,39 @@ func main() {
 		os.Exit(1)
 	}
 
-	WasmFile, err := os.Open(flag.Arg(0))
+	wasmFile, err := os.Open(flag.Arg(0))
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer WasmFile.Close()
+	defer wasmFile.Close()
 
-	WasmModule, err := wasm.ReadModule(WasmFile, nil)
+	wasmModule, err := wasm.ReadModule(wasmFile, nil)
 	if err != nil {
 		log.Fatalf("could not read module: %v", err)
 	}
 
-	err = validate.VerifyModule(WasmModule)
+	err = validate.VerifyModule(wasmModule)
 	if err != nil {
 		log.Fatalf("could not verify module: %v", err)
 	}
 
-	if WasmModule.Export == nil {
+	if wasmModule.Export == nil {
 		log.Fatalf("module has no export section")
 	}
 
-	WasmFunctionId, res := WasmModule.Export.Entries[*ExportFunctionName]
+	wasmFuncId, res := wasmModule.Export.Entries[*wasmFuncName]
 	if !res {
-		log.Fatalf("export function not found")
+		log.Fatalf("could not find export function")
 	}
 
-	WasmVM, err := exec.NewVM(WasmModule)
+	wasmVM, err := exec.NewVM(wasmModule)
 	if err != nil {
 		log.Fatalf("could not create VM: %v", err)
 	}
 
-	ret, err := WasmVM.ExecCode(int64(WasmFunctionId.Index))
+	ret, err := wasmVM.ExecCode(int64(wasmFuncId.Index))
 	if err != nil {
-		log.Fatalf("error while function executing: %v", err)
+		log.Fatalf("could not execute requested function: %v", err)
 	}
 
 	fmt.Fprintf(os.Stdout, "%[1]v (%[1]T)\n", ret)
