@@ -7,7 +7,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 
@@ -20,8 +19,7 @@ func main() {
 	log.SetPrefix("wasm-run: ")
 	log.SetFlags(0)
 
-	verbose := flag.Bool("v", false, "enable/disable verbose mode")
-	verify := flag.Bool("verify-module", false, "run module verification")
+	wasmFuncName := flag.String("func-name", "main", "called function name")
 
 	flag.Parse()
 
@@ -30,83 +28,40 @@ func main() {
 		os.Exit(1)
 	}
 
-	wasm.SetDebugMode(*verbose)
-
-	run(os.Stdout, flag.Arg(0), *verify)
-}
-
-func run(w io.Writer, fname string, verify bool) {
-	f, err := os.Open(fname)
+	wasmFile, err := os.Open(flag.Arg(0))
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer f.Close()
+	defer wasmFile.Close()
 
-	m, err := wasm.ReadModule(f, importer)
+	wasmModule, err := wasm.ReadModule(wasmFile, nil)
 	if err != nil {
 		log.Fatalf("could not read module: %v", err)
 	}
 
-	if verify {
-		err = validate.VerifyModule(m)
-		if err != nil {
-			log.Fatalf("could not verify module: %v", err)
-		}
+	err = validate.VerifyModule(wasmModule)
+	if err != nil {
+		log.Fatalf("could not verify module: %v", err)
 	}
 
-	if m.Export == nil {
+	if wasmModule.Export == nil {
 		log.Fatalf("module has no export section")
 	}
 
-	vm, err := exec.NewVM(m)
+	wasmFuncId, res := wasmModule.Export.Entries[*wasmFuncName]
+	if !res {
+		log.Fatalf("could not find export function")
+	}
+
+	wasmVM, err := exec.NewVM(wasmModule)
 	if err != nil {
 		log.Fatalf("could not create VM: %v", err)
 	}
 
-	for name, e := range m.Export.Entries {
-		i := int64(e.Index)
-		fidx := m.Function.Types[int(i)]
-		ftype := m.Types.Entries[int(fidx)]
-		switch len(ftype.ReturnTypes) {
-		case 1:
-			fmt.Fprintf(w, "%s() %s => ", name, ftype.ReturnTypes[0])
-		case 0:
-			fmt.Fprintf(w, "%s() => ", name)
-		default:
-			log.Printf("running exported functions with more than one return value is not supported")
-			continue
-		}
-		if len(ftype.ParamTypes) > 0 {
-			log.Printf("running exported functions with input parameters is not supported")
-			continue
-		}
-		o, err := vm.ExecCode(i)
-		if err != nil {
-			fmt.Fprintf(w, "\n")
-			log.Printf("err=%v", err)
-			continue
-		}
-		if len(ftype.ReturnTypes) == 0 {
-			fmt.Fprintf(w, "\n")
-			continue
-		}
-		fmt.Fprintf(w, "%[1]v (%[1]T)\n", o)
+	ret, err := wasmVM.ExecCode(int64(wasmFuncId.Index))
+	if err != nil {
+		log.Fatalf("could not execute requested function: %v", err)
 	}
-}
 
-func importer(name string) (*wasm.Module, error) {
-	f, err := os.Open(name + ".wasm")
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	m, err := wasm.ReadModule(f, nil)
-	if err != nil {
-		return nil, err
-	}
-	err = validate.VerifyModule(m)
-	if err != nil {
-		return nil, err
-	}
-	return m, nil
+	fmt.Fprintf(os.Stdout, "%[1]v (%[1]T)\n", ret)
 }
